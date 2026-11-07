@@ -1,7 +1,7 @@
 .{
     .name = .dkterm,
     .fingerprint = 0x480e92226afb5ec9,
-    .version = "0.0.1",
+    .version = "0.1.0",
     .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .toml = .{
