@@ -1,12 +1,12 @@
 .{
     .name = .dkterm,
     .fingerprint = 0x480e92226afb5ec9,
-    .version = "0.1.0",
+    .version = "0.1.1",
     .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .toml = .{
-            .url = "https://github.com/BearzRobotics/toml-zig/releases/download/v0.1.0/toml-0.1.0.tar.gz",
-            .hash = "toml-0.1.0-dDatLI4xAgB1P1SWnx8mnn9oHfDkYSZbqBMOKvKR-X3N",
+            .url = "https://github.com/BearzRobotics/toml-zig/releases/download/v0.2.0/toml-0.2.0.tar.gz",
+            .hash = "toml-0.2.0-dDatLIhiAgBq8q4SLFu0RZSUcCJLAwl49UZRIZ-fHqqx",
         },
         .ghostty = .{
             .url = "https://github.com/ghostty-org/ghostty/archive/ce787fc18a7782e81585beb63f0d905ccaf69284.tar.gz",
