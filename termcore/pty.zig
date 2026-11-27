@@ -26,6 +26,7 @@ extern fn _exit(status: c_int) noreturn;
 extern fn waitpid(pid: c_int, status: ?*c_int, options: c_int) c_int;
 extern fn kill(pid: c_int, sig: c_int) c_int;
 const sys_poll = @extern(*const fn (fds: *allowzero anyopaque, n: c_ulong, timeout: c_int) callconv(.c) c_int, .{ .name = "poll" });
+extern fn pipe2(fds: *[2]c_int, flags: c_int) c_int;
 extern fn chdir(path: [*:0]const u8) c_int;
 extern fn __errno_location() *c_int;
 
@@ -37,6 +38,7 @@ const F_SETFD = 2;
 const F_DUPFD_CLOEXEC = 1030;
 const FD_CLOEXEC = 1;
 const O_NONBLOCK = 0o4000;
+const O_CLOEXEC = 0o2000000;
 const EAGAIN = 11;
 const EINTR = 4;
 const WNOHANG = 1;
@@ -61,10 +63,21 @@ pub const Pty = struct {
         /// The whole environment, each "NAME=value".
         env: []const [:0]const u8,
         size: Size,
+        /// Where the program starts. `spawn` fails if it cannot go there.
         cwd: ?[:0]const u8 = null,
+        /// If `spawn` fails in the child, receives the system's error number.
+        failure_errno: ?*c_int = null,
     };
 
-    pub const Error = error{ OpenPtyFailed, ForkFailed, OutOfMemory };
+    pub const Error = error{
+        OpenPtyFailed,
+        ForkFailed,
+        OutOfMemory,
+        /// The child could not take the terminal as its own.
+        ChildSetupFailed,
+        /// `SpawnOptions.cwd` could not be entered.
+        BadWorkingDirectory,
+    };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOptions) Error!Pty {
         // Everything the child needs is built before the fork: after it, only
@@ -87,28 +100,76 @@ pub const Pty = struct {
             _ = close(slave);
             return error.OpenPtyFailed;
         }
-        _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | @as(c_int, O_NONBLOCK));
+        const flags = fcntl(master, F_GETFL);
+        // A child that fails before it runs the program says why on this pipe.
+        var report: [2]c_int = undefined;
+        if (flags < 0 or fcntl(master, F_SETFL, flags | @as(c_int, O_NONBLOCK)) != 0 or pipe2(&report, O_CLOEXEC) != 0) {
+            _ = close(master);
+            _ = close(slave);
+            return error.OpenPtyFailed;
+        }
+        if (!liftAboveStdio(&report[0]) or !liftAboveStdio(&report[1])) {
+            _ = close(report[0]);
+            _ = close(report[1]);
+            _ = close(master);
+            _ = close(slave);
+            return error.OpenPtyFailed;
+        }
 
         const pid = fork();
         if (pid < 0) {
+            _ = close(report[0]);
+            _ = close(report[1]);
             _ = close(master);
             _ = close(slave);
             return error.ForkFailed;
         }
         if (pid == 0) {
-            _ = setsid();
-            _ = ioctl(slave, TIOCSCTTY, @as(c_int, 0));
-            _ = dup2(slave, 0);
-            _ = dup2(slave, 1);
-            _ = dup2(slave, 2);
+            if (setsid() < 0 or ioctl(slave, TIOCSCTTY, @as(c_int, 0)) != 0 or
+                dup2(slave, 0) < 0 or dup2(slave, 1) < 0 or dup2(slave, 2) < 0)
+                childFailed(report[1], .setup);
             _ = close(slave);
             _ = close(master);
-            if (opts.cwd) |c| _ = chdir(c.ptr);
+            if (opts.cwd) |c| if (chdir(c.ptr) != 0) childFailed(report[1], .cwd);
             _ = execve(opts.path.ptr, argv.ptr, envp.ptr);
             _exit(127);
         }
         _ = close(slave);
+        _ = close(report[1]);
+        defer _ = close(report[0]);
+        if (readFailure(report[0])) |failure| {
+            _ = close(master);
+            while (waitpid(pid, null, 0) < 0 and errno() == EINTR) {}
+            if (opts.failure_errno) |out| out.* = failure.code;
+            return switch (failure.stage) {
+                .setup => error.ChildSetupFailed,
+                .cwd => error.BadWorkingDirectory,
+            };
+        }
         return .{ .master = master, .pid = pid };
+    }
+
+    const Failure = extern struct {
+        stage: enum(c_int) { setup, cwd },
+        code: c_int,
+    };
+
+    /// In the child: reports the failure and ends it. Async-signal-safe.
+    fn childFailed(pipe: c_int, stage: @FieldType(Failure, "stage")) noreturn {
+        const failure: Failure = .{ .stage = stage, .code = errno() };
+        _ = sys_write(pipe, std.mem.asBytes(&failure), @sizeOf(Failure));
+        _exit(127);
+    }
+
+    /// What the child reported, or null once the pipe closes without a report.
+    fn readFailure(pipe: c_int) ?Failure {
+        var failure: Failure = undefined;
+        while (true) {
+            // A report is written at once and is far below PIPE_BUF.
+            const n = read(pipe, std.mem.asBytes(&failure), @sizeOf(Failure));
+            if (n == @sizeOf(Failure)) return failure;
+            if (n >= 0 or errno() != EINTR) return null;
+        }
     }
 
     /// Moves `descriptor` to 3 or higher, close-on-exec.

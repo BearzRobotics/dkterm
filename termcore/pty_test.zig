@@ -206,3 +206,16 @@ test "the child has stdin, stdout and stderr when the parent has them closed" {
         try out.until(&p, "all-open");
     }
 }
+
+test "a directory that cannot be entered fails the spawn" {
+    var code: c_int = 0;
+    try testing.expectError(error.BadWorkingDirectory, Pty.spawn(testing.allocator, .{
+        .path = "/bin/sh",
+        .argv = &.{ "sh", "-c", "pwd" },
+        .env = &.{},
+        .size = size,
+        .cwd = "/nonexistent-dir-xyz",
+        .failure_errno = &code,
+    }));
+    try testing.expectEqual(@backingInt(std.os.linux.E.NOENT), code);
+}
