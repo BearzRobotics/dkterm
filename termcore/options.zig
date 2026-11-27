@@ -76,36 +76,75 @@ pub fn parseCursor(text: []const u8) CursorStyle {
     return .block;
 }
 
-test "defaults for an empty file" {
-    var p = try Options.parse(std.testing.allocator, "", null);
+fn expectOptions(want: Options, source: []const u8) !void {
+    var p = try Options.parse(std.testing.allocator, source, null);
     defer p.deinit();
-    try std.testing.expectEqualStrings(schemes.default_scheme, p.options.color_scheme);
-    try std.testing.expectEqual(@as(u32, 10_000), p.options.scrollback_lines);
-    try std.testing.expect(p.options.osc52);
+    inline for (@typeInfo(Options).@"struct".field_names) |name| {
+        const got = @field(p.options, name);
+        if (@TypeOf(got) == []const u8)
+            try std.testing.expectEqualStrings(@field(want, name), got)
+        else
+            try std.testing.expectEqual(@field(want, name), got);
+    }
 }
 
-test "keys are read and clamped" {
-    var p = try Options.parse(std.testing.allocator,
+test "defaults for an empty file" {
+    try expectOptions(.{
+        .color_scheme = "campbell",
+        .cursor = .block,
+        .scrollback_lines = 10_000,
+        .osc52 = true,
+        .copy_on_select = true,
+        .command = "",
+        .directory = "",
+    }, "");
+}
+
+test "every key is read" {
+    try expectOptions(.{
+        .color_scheme = "solarized-dark",
+        .cursor = .bar,
+        .scrollback_lines = 123,
+        .osc52 = false,
+        .copy_on_select = false,
+        .command = "/bin/sh",
+        .directory = "/srv",
+    },
         \\color-scheme = "solarized-dark"
         \\cursor-style = "Bar"
-        \\scrollback-lines = 99999999
+        \\scrollback-lines = 123
         \\osc52 = false
+        \\copy-on-select = false
         \\command = "/bin/sh"
+        \\directory = "/srv"
         \\unknown = 1
-    , null);
-    defer p.deinit();
-    try std.testing.expectEqualStrings("solarized-dark", p.options.color_scheme);
-    try std.testing.expectEqual(CursorStyle.bar, p.options.cursor);
-    try std.testing.expectEqual(@as(u32, max_scrollback_lines), p.options.scrollback_lines);
-    try std.testing.expect(!p.options.osc52);
-    try std.testing.expectEqualStrings("/bin/sh", p.options.command);
+    );
+}
+
+test "scrollback is kept within bounds" {
+    try expectOptions(.{ .scrollback_lines = max_scrollback_lines }, "scrollback-lines = 99999999");
+    try expectOptions(.{ .scrollback_lines = max_scrollback_lines }, "scrollback-lines = 1000000");
+    try expectOptions(.{ .scrollback_lines = 0 }, "scrollback-lines = 0");
+    try expectOptions(.{ .scrollback_lines = 0 }, "scrollback-lines = -1");
+}
+
+test "cursor styles" {
+    try expectOptions(.{ .cursor = .block }, "cursor-style = \"block\"");
+    try expectOptions(.{ .cursor = .bar }, "cursor-style = \"bar\"");
+    try expectOptions(.{ .cursor = .underline }, "cursor-style = \"UnderLine\"");
+    try expectOptions(.{ .cursor = .block }, "cursor-style = \"beam\"");
 }
 
 test "mistyped keys keep their defaults" {
-    var p = try Options.parse(std.testing.allocator, "osc52 = \"yes\"\nscrollback-lines = \"many\"\n", null);
-    defer p.deinit();
-    try std.testing.expect(p.options.osc52);
-    try std.testing.expectEqual(@as(u32, 10_000), p.options.scrollback_lines);
+    try expectOptions(.{},
+        \\color-scheme = 1
+        \\cursor-style = true
+        \\scrollback-lines = "many"
+        \\osc52 = "yes"
+        \\copy-on-select = 0
+        \\command = false
+        \\directory = ["a"]
+    );
 }
 
 test "malformed TOML is an error the caller can handle" {

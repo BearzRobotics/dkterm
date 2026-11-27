@@ -48,8 +48,23 @@ pub fn scheme(name: []const u8) Scheme {
 
 pub const names = [_][]const u8{ "campbell", "one-half-dark", "solarized-dark", "solarized-light" };
 
-test "unknown names give the default and every listed name resolves" {
-    try std.testing.expectEqual(scheme("nope").background, scheme(default_scheme).background);
-    for (names) |n| _ = scheme(n);
-    try std.testing.expect(scheme("solarized-light").background != scheme("campbell").background);
+test "each name gives its own scheme, in any case, and others give the default" {
+    // Background, foreground, and ANSI 1 (red), 8 and 15.
+    const want = [names.len]struct { []const u8, [5]u24 }{
+        .{ "campbell", .{ 0x0C0C0C, 0xCCCCCC, 0xC50F1F, 0x767676, 0xF2F2F2 } },
+        .{ "one-half-dark", .{ 0x282C34, 0xDCDFE4, 0xE06C75, 0x5A6374, 0xDCDFE4 } },
+        .{ "solarized-dark", .{ 0x002B36, 0x839496, 0xDC322F, 0x002B36, 0xFDF6E3 } },
+        .{ "solarized-light", .{ 0xFDF6E3, 0x657B83, 0xDC322F, 0x002B36, 0xFDF6E3 } },
+    };
+    for (names, want) |name, entry| {
+        try std.testing.expectEqualStrings(entry[0], name);
+        var upper: [32]u8 = undefined;
+        for ([_][]const u8{ name, std.ascii.upperString(&upper, name) }) |spelling| {
+            const s = scheme(spelling);
+            try std.testing.expectEqual(entry[1], [5]u24{ s.background, s.foreground, s.ansi[1], s.ansi[8], s.ansi[15] });
+        }
+    }
+    try std.testing.expectEqualStrings("campbell", default_scheme);
+    try std.testing.expectEqual(scheme(default_scheme), scheme("nope"));
+    try std.testing.expectEqual(scheme(default_scheme), scheme(""));
 }
