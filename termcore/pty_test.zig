@@ -306,3 +306,10 @@ test "a child reaped by someone else has an unknown exit, not a successful one" 
     defer p.deinit();
     try testing.expectEqual(Pty.Exit.unknown, try waitExit(&p));
 }
+
+test "reading into an empty buffer is not a hangup" {
+    var p = try spawnSh("read line", .{});
+    defer p.deinit();
+    var empty: [0]u8 = .{};
+    try testing.expectEqual(@as(?usize, 0), p.readSome(&empty));
+}

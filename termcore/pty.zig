@@ -270,6 +270,8 @@ pub const Pty = struct {
     /// Read what the child wrote. Returns 0 when nothing is waiting, and null
     /// when the child side is closed.
     pub fn readSome(self: *const Pty, buf: []u8) ?usize {
+        // read would return 0 for this, which means something else.
+        if (buf.len == 0) return 0;
         while (true) {
             const n = read(self.master, buf.ptr, buf.len);
             if (n > 0) return @intCast(n);
