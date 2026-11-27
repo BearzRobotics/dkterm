@@ -5,11 +5,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Debug builds of libghostty-vt run integrity checks on every linefeed,
-    // which makes a screenful of output take seconds. Always build it fast.
+    // libghostty-vt parses untrusted output, so it gets the caller's safety
+    // checks. The exception is Debug: it then also runs integrity checks on
+    // every linefeed, which makes a screenful of output take seconds, so a
+    // Debug build gets ReleaseSafe.
     // -Dsimd=false leaves out simdutf and highway, which are C++ (a rescue console wants that).
     const simd = b.option(bool, "simd", "Build libghostty-vt with SIMD (C++) helpers (default: true)") orelse true;
-    const ghostty = b.dependency("ghostty", .{ .target = target, .optimize = .ReleaseFast, .simd = simd });
+    const ghostty = b.dependency("ghostty", .{ .target = target, .optimize = if (optimize == .debug) .safe else optimize, .simd = simd });
     // Consumers that talk to libghostty-vt themselves must use this same instance.
     b.modules.put(b.allocator, b.dupe("ghostty-vt"), ghostty.module("ghostty-vt")) catch @panic("OOM");
 

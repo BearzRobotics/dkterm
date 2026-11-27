@@ -25,7 +25,9 @@ mod.addImport("ghostty-vt", dkterm.module("ghostty-vt"));
 ```
 
 `-Dsimd=false` builds libghostty-vt without its C++ SIMD helpers (what a rescue console wants).
-Debug builds still compile libghostty-vt in ReleaseFast: in Debug it checks itself on every linefeed.
+libghostty-vt is built in the mode you build in, so a `ReleaseSafe` build has safety checks in the
+parser of untrusted output too (on one x86_64 machine they cost 6-13% of parsing speed). A Debug
+build compiles it in `ReleaseSafe`: in Debug it checks itself on every linefeed.
 
 ## Settings
 
