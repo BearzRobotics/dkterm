@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
 //! Terminal code shared by the terminal frontends (DKTerm, DKConsole).
-//! Imports only `std` and libghostty-vt: no GTK, GLib or Pango.
+//! Imports `std`, libghostty-vt and, for `options` alone, toml-zig: no GTK,
+//! GLib or Pango.
 
 pub const pty = @import("pty.zig");
 pub const schemes = @import("schemes.zig");

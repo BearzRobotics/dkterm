@@ -1,7 +1,7 @@
 DKTermCore — Specification
 Status: Draft 0.1 — proposed extraction contract, not a claim of implemented functionality.
 
-Engineering foundation: ai/AGENT.md in this repository. Where that document is unavailable, its requirements remain to be incorporated rather than invented.
+Engineering foundation: ai/AGENTS.md in this repository. Where that document is unavailable, its requirements remain to be incorporated rather than invented.
 1. Purpose
 DKTermCore is a reusable, frontend-independent Zig terminal engine. Its initial consumers are DKTerm (a graphical Wayland terminal) and DKConsole (a standalone Linux virtual-terminal console). Neither consumer owns the engine, and DKTermCore must not depend on DKDE, DKTerm, or DKConsole.
 
@@ -94,7 +94,7 @@ Acceptance
 DKTermCore is independently buildable and testable, neither consumer's source tree is needed, and both consumers can import the same pinned revision without private DKDE headers or modules.
 10. Repository structure (proposed)
 dktermcore/
-├── ai/AGENT.md
+├── ai/AGENTS.md
 ├── SPEC.md
 ├── README.md
 ├── LICENSE

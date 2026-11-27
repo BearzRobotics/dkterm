@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
-//! Pseudo-terminal plumbing without GLib (SPEC.md 4.3): a new PTY, a child
+//! Pseudo-terminal plumbing without GLib: a new PTY, a child
 //! started with `fork`/`execve` on the slave side, `TIOCSWINSZ` for resize.
 //! The child gets the terminal as descriptors 0-2 and nothing else that this
 //! process has open.

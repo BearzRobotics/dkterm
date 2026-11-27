@@ -15,8 +15,10 @@
 //! directory = ""               # empty: the user's home
 //! ```
 //!
-//! Unknown keys are ignored and missing or mistyped keys take their defaults,
-//! so a damaged file never stops a terminal from starting.
+//! In a valid file, unknown keys are ignored and missing or mistyped keys take
+//! their defaults. Text that is not valid TOML, a repeated key included, is an
+//! error: report it and carry on with `Options{}`, so that a damaged file does
+//! not stop a terminal from starting.
 
 const std = @import("std");
 const toml = @import("toml");

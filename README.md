@@ -8,7 +8,7 @@ It holds what does not depend on a window or a display:
 | Module | What it does |
 |---|---|
 | `termcore.pty` | spawn a program on a pseudo-terminal, resize it, read and write it |
-| `termcore.keymap` | key events (GDK-style key values or evdev codes) to terminal input |
+| `termcore.keymap` | Linux evdev codes, or GTK hardware keycodes, to libghostty-vt keys (libghostty-vt does the encoding) |
 | `termcore.schemes` | colour schemes (`campbell`, `one-half-dark`, `solarized-dark`, `solarized-light`) |
 | `termcore.glue` | libghostty-vt colour and palette setup for a scheme |
 | `termcore.options` | optional: the frontend-neutral settings read from TOML with toml-zig |

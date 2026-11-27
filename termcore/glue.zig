@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
-//! libghostty-vt setup shared by the programs that host a terminal
-//! (SPEC.md 4.3).
+//! libghostty-vt setup shared by the programs that host a terminal.
 
 const std = @import("std");
 const vt = @import("ghostty-vt");

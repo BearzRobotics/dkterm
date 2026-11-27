@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
-//! Colour schemes (SPEC.md 5.3), shared by dkde-term and dkde-console.
+//! Colour schemes, shared by dkde-term and DKConsole.
 
 const std = @import("std");
 
