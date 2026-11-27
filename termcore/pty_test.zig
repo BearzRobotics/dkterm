@@ -219,3 +219,21 @@ test "a directory that cannot be entered fails the spawn" {
     }));
     try testing.expectEqual(@backingInt(std.os.linux.E.NOENT), code);
 }
+
+test "a program that cannot be run fails the spawn" {
+    var code: c_int = 0;
+    const cases = [_]struct { path: [:0]const u8, errno: std.os.linux.E }{
+        .{ .path = "/nonexistent", .errno = .NOENT },
+        .{ .path = "/etc/hostname", .errno = .ACCES }, // not executable
+    };
+    for (cases) |case| {
+        try testing.expectError(error.ExecFailed, Pty.spawn(testing.allocator, .{
+            .path = case.path,
+            .argv = &.{case.path},
+            .env = &.{},
+            .size = size,
+            .failure_errno = &code,
+        }));
+        try testing.expectEqual(@backingInt(case.errno), code);
+    }
+}

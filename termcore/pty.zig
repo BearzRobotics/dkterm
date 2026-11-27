@@ -77,6 +77,8 @@ pub const Pty = struct {
         ChildSetupFailed,
         /// `SpawnOptions.cwd` could not be entered.
         BadWorkingDirectory,
+        /// The program could not be run.
+        ExecFailed,
     };
 
     pub fn spawn(allocator: std.mem.Allocator, opts: SpawnOptions) Error!Pty {
@@ -132,7 +134,7 @@ pub const Pty = struct {
             _ = close(master);
             if (opts.cwd) |c| if (chdir(c.ptr) != 0) childFailed(report[1], .cwd);
             _ = execve(opts.path.ptr, argv.ptr, envp.ptr);
-            _exit(127);
+            childFailed(report[1], .exec);
         }
         _ = close(slave);
         _ = close(report[1]);
@@ -144,13 +146,14 @@ pub const Pty = struct {
             return switch (failure.stage) {
                 .setup => error.ChildSetupFailed,
                 .cwd => error.BadWorkingDirectory,
+                .exec => error.ExecFailed,
             };
         }
         return .{ .master = master, .pid = pid };
     }
 
     const Failure = extern struct {
-        stage: enum(c_int) { setup, cwd },
+        stage: enum(c_int) { setup, cwd, exec },
         code: c_int,
     };
 
