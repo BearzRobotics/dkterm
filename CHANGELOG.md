@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+Depends on toml-zig 0.3.0. `termcore.options` exposes toml-zig types, so a program that passes
+its own TOML tables to it must use toml-zig 0.3.0 too. toml-zig 0.3.0 refuses some input it
+accepted before, such as a float too large for 64 bits; see its release notes.
+
 ## 0.2.0
 
 ### License
