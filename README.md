@@ -29,6 +29,45 @@ libghostty-vt is built in the mode you build in, so a `ReleaseSafe` build has sa
 parser of untrusted output too (on one x86_64 machine they cost 6-13% of parsing speed). A Debug
 build compiles it in `ReleaseSafe`: in Debug it checks itself on every linefeed.
 
+## Running a program on a pseudo-terminal
+
+The caller owns the event loop. `Pty.fd` is the master, non-blocking, to put in a `poll`.
+
+```zig
+const Pty = termcore.pty.Pty;
+var pty = try Pty.spawn(gpa, .{ .path = "/bin/sh", .argv = &.{"sh"}, .env = &.{"TERM=xterm-256color"},
+    .size = .{ .cols = 80, .rows = 24 } });
+defer pty.deinit();
+var outbox: termcore.pty.Outbox = .{};
+defer outbox.deinit(gpa);
+
+// Input: queue each message whole, then write what the terminal takes now.
+try outbox.queue(gpa, &.{ "ls", "\r" });
+try outbox.flush(gpa, &pty);
+// While outbox.pending(), also poll for POLLOUT and flush again.
+
+// Output, when fd is readable:
+const n = pty.readSome(&buf) catch |err| switch (err) {
+    error.HungUp => ..., // not necessarily the end; see below
+    error.ReadFailed => ...,
+};
+if (pty.poll()) |exit| ... // .exited, .signaled or .unknown
+```
+
+- `spawn` fails, and starts nothing, if the child cannot take the terminal (`ChildSetupFailed`),
+  enter `cwd` (`BadWorkingDirectory`) or run the program (`ExecFailed`). `failure_errno` receives
+  the system's error number.
+- The child gets the terminal as descriptors 0-2, default signal handling and an empty signal mask.
+  Descriptors this process has open are not passed on.
+- `Outbox` never drops input: `queue` takes all of a message or returns `OutboxFull` (8 MiB by
+  default). `Pty.write` is the unbuffered form and returns how much was taken. Keep reading output
+  while input waits.
+- `error.HungUp` means nothing has the terminal open now. A running child can open it again, so end
+  the session when `poll` reports an exit. Until then `fd` stays ready: wait a little before polling
+  it again.
+- `deinit` hangs up the terminal and sends SIGHUP and SIGTERM. A child still running after
+  `Pty.grace_ms` (500 ms) is killed with its process group. It returns in bounded time.
+
 ## Settings
 
 `termcore.options.Options.parse(gpa, toml_text, diag)` reads these top-level keys; anything else is
@@ -51,7 +90,12 @@ Frontend-only settings (fonts, opacity, tabs, padding) belong to the frontend.
 
 ## Stability
 
-No API or ABI stability is promised yet (see `ai/SPECS.md`). `zig build test` runs the tests.
+No API or ABI stability is promised yet (see `ai/SPECS.md`); `CHANGELOG.md` lists what changed.
+`zig build test` runs the tests. Some start real programs and need Linux, `/bin/sh`, `cat` and `stty`.
+
+Release tarballs: `dkterm-VERSION.tar.gz` is the source (dependencies are fetched by `zig build`);
+`dkterm-VERSION-vendored.tar.gz` also holds every dependency in `zig-pkg/`, so it builds with no
+network (`zig build --system zig-pkg`). Each dependency there keeps its own license.
 
 ## License
 

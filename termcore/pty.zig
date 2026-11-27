@@ -113,8 +113,8 @@ pub const Pty = struct {
         var slave: c_int = undefined;
         if (!openPair(&master, &slave, winsize(opts.size))) return error.OpenPtyFailed;
         const descriptor_limit = getdtablesize();
-        // With a standard descriptor closed in this process, openpty hands out
-        // its number, which the child is about to overwrite.
+        // With a standard descriptor closed in this process, the new terminal
+        // gets its number, which the child is about to overwrite.
         if (!liftAboveStdio(&master) or !liftAboveStdio(&slave)) {
             _ = close(master);
             _ = close(slave);

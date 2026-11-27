@@ -1,7 +1,7 @@
 .{
     .name = .dkterm,
     .fingerprint = 0x480e92226afb5ec9,
-    .version = "0.1.1",
+    .version = "0.2.0",
     .minimum_zig_version = "0.17.1",
     .dependencies = .{
         .toml = .{
@@ -13,5 +13,5 @@
             .hash = "ghostty-1.4.0-5UdBC-qohwWqLS0BImOz05t4hVyTwbaKslyTPvKYvAtE",
         },
     },
-    .paths = .{ "build.zig", "build.zig.zon", "termcore", "ai", "docs", "LICENSE", "README.md" },
+    .paths = .{ "build.zig", "build.zig.zon", "termcore", "ai", "docs/manpages", "LICENSE", "README.md", "CHANGELOG.md" },
 }
