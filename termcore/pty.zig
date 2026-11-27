@@ -301,14 +301,28 @@ pub const Pty = struct {
         return done;
     }
 
-    /// The exit status if the child has ended, else null. Reaps it.
-    pub fn poll(self: *Pty) ?u32 {
-        if (self.pid <= 0) return 0;
+    /// How the child ended.
+    pub const Exit = union(enum) {
+        /// It exited with this status.
+        exited: u8,
+        /// This signal killed it.
+        signaled: u8,
+
+        fn decode(status: c_int) Exit {
+            const bits: u32 = @bitCast(status);
+            const sig: u8 = @intCast(bits & 0x7F);
+            return if (sig == 0) .{ .exited = @truncate(bits >> 8) } else .{ .signaled = sig };
+        }
+    };
+
+    /// How the child ended, or null while it runs. Reaps it.
+    pub fn poll(self: *Pty) ?Exit {
+        if (self.pid <= 0) return .{ .exited = 0 };
         var status: c_int = 0;
         const r = waitpid(self.pid, &status, WNOHANG);
         if (r == 0) return null;
         self.pid = 0;
-        return @bitCast(status);
+        return .decode(status);
     }
 
     /// How long `deinit` lets the child end on its own before killing it.

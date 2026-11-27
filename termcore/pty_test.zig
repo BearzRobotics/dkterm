@@ -88,12 +88,30 @@ test "input reaches the child and its exit is seen" {
     _ = try p.write("abc\n");
     var out: Output = .{};
     try out.until(&p, "got:abc");
+    try testing.expectEqual(Pty.Exit{ .exited = 3 }, try waitExit(&p));
+}
+
+fn waitExit(p: *Pty) !Pty.Exit {
     var tries: usize = 0;
-    const status = while (tries < 200) : (tries += 1) {
-        if (p.poll()) |status| break status;
+    while (tries < 200) : (tries += 1) {
+        if (p.poll()) |status| return status;
         _ = poll(undefined, 0, 10);
-    } else return error.ChildDidNotExit;
-    try testing.expectEqual(@as(u32, 3 << 8), status);
+    }
+    return error.ChildDidNotExit;
+}
+
+test "poll tells an exit status from a signal" {
+    const cases = [_]struct { script: [:0]const u8, exit: Pty.Exit }{
+        .{ .script = "exit 0", .exit = .{ .exited = 0 } },
+        .{ .script = "exit 1", .exit = .{ .exited = 1 } },
+        .{ .script = "exit 255", .exit = .{ .exited = 255 } },
+        .{ .script = "kill -9 $$", .exit = .{ .signaled = 9 } },
+    };
+    for (cases) |case| {
+        var p = try spawnSh(case.script, .{});
+        defer p.deinit();
+        try testing.expectEqual(case.exit, try waitExit(&p));
+    }
 }
 
 test "a large message reaches a child that starts reading late, whole" {
