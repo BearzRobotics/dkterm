@@ -47,3 +47,14 @@ Frontend-only settings (fonts, opacity, tabs, padding) belong to the frontend.
 ## Stability
 
 No API or ABI stability is promised yet (see `ai/SPECS.md`). `zig build test` runs the tests.
+
+## License
+
+Copyright (c) 2026 Dakota James Owen Keeler.
+
+dkterm is free software under the GNU Library General Public License, version 2
+or (at your option) any later version (`LGPL-2.0-or-later`). It comes with no
+warranty. See `LICENSE`. Releases made before this change were published
+under the MIT License.
+
+libghostty-vt (Ghostty), which dkterm builds and re-exports, keeps its MIT License.

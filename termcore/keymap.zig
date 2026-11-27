@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
 //! Physical key mapping for the kitty keyboard protocol: Linux evdev codes to
 //! the W3C-style key names libghostty-vt wants. GTK reports the evdev code + 8;
 //! dkde-console reads evdev codes directly.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
 //! Pseudo-terminal plumbing without GLib (SPEC.md 4.3): `openpty`, a child
 //! started with `fork`/`execve` on the slave side, `TIOCSWINSZ` for resize.
 //! Everything used exists in both glibc and musl.

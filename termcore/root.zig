@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
 //! Terminal code shared by the terminal frontends (DKTerm, DKConsole).
 //! Imports only `std` and libghostty-vt: no GTK, GLib or Pango.
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.0-or-later
 //! Optional TOML reader for the frontend-neutral terminal settings.
 //!
 //! The engine does not need it: a frontend can fill `Options` itself. It is
