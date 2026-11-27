@@ -34,6 +34,7 @@ const TIOCSCTTY: c_ulong = 0x540E;
 const F_GETFL = 3;
 const F_SETFL = 4;
 const F_SETFD = 2;
+const F_DUPFD_CLOEXEC = 1030;
 const FD_CLOEXEC = 1;
 const O_NONBLOCK = 0o4000;
 const EAGAIN = 11;
@@ -79,7 +80,13 @@ pub const Pty = struct {
         var slave: c_int = undefined;
         const ws = winsize(opts.size);
         if (openpty(&master, &slave, null, null, &ws) != 0) return error.OpenPtyFailed;
-        _ = fcntl(master, F_SETFD, @as(c_int, FD_CLOEXEC));
+        // With a standard descriptor closed in this process, openpty hands out
+        // its number, which the child is about to overwrite.
+        if (!liftAboveStdio(&master) or !liftAboveStdio(&slave)) {
+            _ = close(master);
+            _ = close(slave);
+            return error.OpenPtyFailed;
+        }
         _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | @as(c_int, O_NONBLOCK));
 
         const pid = fork();
@@ -94,7 +101,7 @@ pub const Pty = struct {
             _ = dup2(slave, 0);
             _ = dup2(slave, 1);
             _ = dup2(slave, 2);
-            if (slave > 2) _ = close(slave);
+            _ = close(slave);
             _ = close(master);
             if (opts.cwd) |c| _ = chdir(c.ptr);
             _ = execve(opts.path.ptr, argv.ptr, envp.ptr);
@@ -102,6 +109,16 @@ pub const Pty = struct {
         }
         _ = close(slave);
         return .{ .master = master, .pid = pid };
+    }
+
+    /// Moves `descriptor` to 3 or higher, close-on-exec.
+    fn liftAboveStdio(descriptor: *c_int) bool {
+        if (descriptor.* > 2) return fcntl(descriptor.*, F_SETFD, @as(c_int, FD_CLOEXEC)) == 0;
+        const moved = fcntl(descriptor.*, F_DUPFD_CLOEXEC, @as(c_int, 3));
+        if (moved < 0) return false;
+        _ = close(descriptor.*);
+        descriptor.* = moved;
+        return true;
     }
 
     fn winsize(s: Size) Winsize {

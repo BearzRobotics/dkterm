@@ -170,3 +170,39 @@ test "deinit is quick for a child that obeys" {
     p.deinit();
     try testing.expect(nowMs() - began < Pty.grace_ms);
 }
+
+extern fn close(fd: c_int) c_int;
+extern fn dup2(old: c_int, new: c_int) c_int;
+extern fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
+
+test "the child has stdin, stdout and stderr when the parent has them closed" {
+    const F_DUPFD_CLOEXEC = 1030;
+    var fd: c_int = 0;
+    while (fd <= 2) : (fd += 1) {
+        const saved = fcntl(fd, F_DUPFD_CLOEXEC, @as(c_int, 100));
+        if (saved < 0) return error.SkipZigTest;
+        _ = close(fd);
+        const spawned = spawnSh(
+            "for n in 0 1 2; do [ -e /proc/$$/fd/$n ] || exit 1; done; echo all-open",
+            .{},
+        );
+        // The master must not sit on a standard descriptor. It is closed here,
+        // before the restore below would silently replace it.
+        var misplaced = false;
+        var result = spawned;
+        if (result) |*live| {
+            if (live.fd() <= 2) {
+                live.deinit();
+                misplaced = true;
+            }
+        } else |_| {}
+        // Restored before anything can fail: the test runner uses them.
+        _ = dup2(saved, fd);
+        _ = close(saved);
+        try testing.expect(!misplaced);
+        var p = try result;
+        defer p.deinit();
+        var out: Output = .{};
+        try out.until(&p, "all-open");
+    }
+}
