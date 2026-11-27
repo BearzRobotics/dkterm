@@ -34,6 +34,8 @@ extern fn waitpid(pid: c_int, status: ?*c_int, options: c_int) c_int;
 extern fn kill(pid: c_int, sig: c_int) c_int;
 const sys_poll = @extern(*const fn (fds: *allowzero anyopaque, n: c_ulong, timeout: c_int) callconv(.c) c_int, .{ .name = "poll" });
 extern fn pipe2(fds: *[2]c_int, flags: c_int) c_int;
+extern fn signal(sig: c_int, handler: usize) usize;
+extern fn sigprocmask(how: c_int, set: *const [16]u64, old: ?*[16]u64) c_int;
 extern fn chdir(path: [*:0]const u8) c_int;
 extern fn __errno_location() *c_int;
 
@@ -51,6 +53,8 @@ const O_CLOEXEC = 0o2000000;
 const EAGAIN = 11;
 const EINTR = 4;
 const WNOHANG = 1;
+const SIG_DFL = 0;
+const SIG_SETMASK = 2;
 const SIGHUP = 1;
 const SIGKILL = 9;
 const SIGTERM = 15;
@@ -136,6 +140,7 @@ pub const Pty = struct {
             return error.ForkFailed;
         }
         if (pid == 0) {
+            resetSignals();
             if (setsid() < 0 or ioctl(slave, TIOCSCTTY, @as(c_int, 0)) != 0 or
                 dup2(slave, 0) < 0 or dup2(slave, 1) < 0 or dup2(slave, 2) < 0)
                 childFailed(report[1], .setup);
@@ -187,6 +192,17 @@ pub const Pty = struct {
         master.* = m;
         slave.* = s;
         return true;
+    }
+
+    /// In the child: execve keeps ignored signals and the blocked mask, and
+    /// a program that inherits them may not answer Ctrl-C. Async-signal-safe.
+    fn resetSignals() void {
+        var sig: c_int = 1;
+        // SIGKILL, SIGSTOP and the ones libc keeps for itself just refuse.
+        while (sig <= 64) : (sig += 1) _ = signal(sig, SIG_DFL);
+        // All zero is the empty set; 128 bytes is sigset_t in glibc and musl.
+        const none: [16]u64 = @splat(0);
+        _ = sigprocmask(SIG_SETMASK, &none, null);
     }
 
     /// In the child: leaves it nothing of the parent's but the terminal. The

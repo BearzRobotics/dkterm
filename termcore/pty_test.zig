@@ -247,3 +247,32 @@ test "the child does not inherit the parent's descriptors" {
     defer _ = close(200);
     try expectOutput("if [ -e /proc/$$/fd/200 ]; then echo le''aked; else echo cl''ean; fi", "clean");
 }
+
+extern fn signal(sig: c_int, handler: usize) usize;
+extern fn sigprocmask(how: c_int, set: ?*const [16]u64, old: ?*[16]u64) c_int;
+
+test "the child does not inherit ignored or blocked signals" {
+    const SIG_IGN = 1;
+    const SIG_BLOCK = 0;
+    const SIG_SETMASK = 2;
+    const old_int = signal(2, SIG_IGN);
+    defer _ = signal(2, old_int);
+    var usr1: [16]u64 = @splat(0);
+    usr1[0] = 1 << (10 - 1);
+    var old_mask: [16]u64 = undefined;
+    _ = sigprocmask(SIG_BLOCK, &usr1, &old_mask);
+    defer _ = sigprocmask(SIG_SETMASK, &old_mask, null);
+
+    // Not through a shell, which changes signals itself.
+    for ([_][]const u8{ "SigBlk:\t0000000000000000", "SigIgn:\t0000000000000000" }) |line| {
+        var p = try Pty.spawn(testing.allocator, .{
+            .path = "/bin/cat",
+            .argv = &.{ "cat", "/proc/self/status" },
+            .env = &.{},
+            .size = size,
+        });
+        defer p.deinit();
+        var out: Output = .{};
+        try out.until(&p, line);
+    }
+}
