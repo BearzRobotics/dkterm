@@ -25,6 +25,7 @@ extern fn execve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: 
 extern fn _exit(status: c_int) noreturn;
 extern fn waitpid(pid: c_int, status: ?*c_int, options: c_int) c_int;
 extern fn kill(pid: c_int, sig: c_int) c_int;
+const sys_poll = @extern(*const fn (fds: *allowzero anyopaque, n: c_ulong, timeout: c_int) callconv(.c) c_int, .{ .name = "poll" });
 extern fn chdir(path: [*:0]const u8) c_int;
 extern fn __errno_location() *c_int;
 
@@ -38,6 +39,10 @@ const O_NONBLOCK = 0o4000;
 const EAGAIN = 11;
 const EINTR = 4;
 const WNOHANG = 1;
+const SIGHUP = 1;
+const SIGKILL = 9;
+const SIGTERM = 15;
+const SIGCONT = 18;
 
 fn errno() c_int {
     return __errno_location().*;
@@ -160,18 +165,45 @@ pub const Pty = struct {
         return @bitCast(status);
     }
 
+    /// How long `deinit` lets the child end on its own before killing it.
+    pub const grace_ms = 500;
+
+    /// Asks the child to end. Does not wait.
     pub fn terminate(self: *Pty) void {
         if (self.pid > 0) {
-            _ = kill(self.pid, 15);
-            _ = kill(self.pid, 18); // SIGCONT, in case it was stopped
+            _ = kill(self.pid, SIGHUP);
+            _ = kill(self.pid, SIGTERM);
+            _ = kill(self.pid, SIGCONT); // in case it was stopped
         }
     }
 
+    /// Hangs up the terminal and ends the child: it has `grace_ms` to leave,
+    /// then it and its process group are killed. Returns in bounded time.
     pub fn deinit(self: *Pty) void {
-        self.terminate();
-        if (self.pid > 0) _ = waitpid(self.pid, null, 0);
+        // Closing first hangs up the terminal, which reaches the foreground
+        // processes as well as the child.
         _ = close(self.master);
+        if (self.pid > 0) {
+            self.terminate();
+            if (!self.reapWithin(grace_ms)) {
+                _ = kill(-self.pid, SIGKILL);
+                _ = kill(self.pid, SIGKILL);
+                // A process stuck in the kernel cannot be waited out; it is
+                // left for the parent's exit.
+                _ = self.reapWithin(1000);
+            }
+        }
         self.* = .{ .master = -1, .pid = 0 };
+    }
+
+    fn reapWithin(self: *Pty, ms: u32) bool {
+        const step_ms = 5;
+        var waited: u32 = 0;
+        while (true) : (waited += step_ms) {
+            if (self.poll() != null) return true;
+            if (waited >= ms) return false;
+            _ = sys_poll(@ptrFromInt(0), 0, step_ms);
+        }
     }
 };
 

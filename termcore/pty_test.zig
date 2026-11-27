@@ -135,3 +135,38 @@ test "a full outbox refuses the whole message" {
     box.clear(gpa);
     try testing.expect(!box.pending());
 }
+
+fn nowMs() i64 {
+    var t: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(.MONOTONIC, &t);
+    return @as(i64, t.sec) * 1000 + @divTrunc(@as(i64, t.nsec), 1_000_000);
+}
+
+extern fn kill(pid: c_int, sig: c_int) c_int;
+
+test "deinit ends a child that ignores SIGHUP and SIGTERM" {
+    var p = try spawnSh("trap '' HUP TERM; echo ready; while :; do sleep 1; done", .{});
+    var out: Output = .{};
+    out.until(&p, "ready") catch |err| {
+        p.deinit();
+        return err;
+    };
+    const pid = p.pid;
+    const began = nowMs();
+    p.deinit();
+    try testing.expect(nowMs() - began < 3000);
+    // Reaped, not merely signalled.
+    try testing.expectEqual(@as(c_int, -1), kill(pid, 0));
+}
+
+test "deinit is quick for a child that obeys" {
+    var p = try spawnSh("echo ready; read line", .{});
+    var out: Output = .{};
+    out.until(&p, "ready") catch |err| {
+        p.deinit();
+        return err;
+    };
+    const began = nowMs();
+    p.deinit();
+    try testing.expect(nowMs() - began < Pty.grace_ms);
+}
