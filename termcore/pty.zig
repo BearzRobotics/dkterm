@@ -52,6 +52,7 @@ const O_NOCTTY = 0o400;
 const O_CLOEXEC = 0o2000000;
 const EAGAIN = 11;
 const EINTR = 4;
+const EIO = 5;
 const ECHILD = 10;
 const WNOHANG = 1;
 const SIG_DFL = 0;
@@ -267,19 +268,29 @@ pub const Pty = struct {
         _ = ioctl(self.master, TIOCSWINSZ, &ws);
     }
 
-    /// Read what the child wrote. Returns 0 when nothing is waiting, and null
-    /// when the child side is closed.
-    pub fn readSome(self: *const Pty, buf: []u8) ?usize {
+    pub const ReadError = error{
+        /// No descriptor for the terminal is open on the child's side now.
+        /// This need not last: a child that is still running can open
+        /// /dev/tty again. Use `poll` to learn whether it has ended. Until
+        /// then `fd` stays ready, so wait a while before polling it again
+        /// instead of reading in a loop.
+        HungUp,
+        ReadFailed,
+    };
+
+    /// Reads what the child wrote. Returns 0 when nothing is waiting.
+    pub fn readSome(self: *const Pty, buf: []u8) ReadError!usize {
         // read would return 0 for this, which means something else.
         if (buf.len == 0) return 0;
         while (true) {
             const n = read(self.master, buf.ptr, buf.len);
             if (n > 0) return @intCast(n);
-            if (n == 0) return null;
+            if (n == 0) return error.HungUp;
             switch (errno()) {
                 EINTR => continue,
                 EAGAIN => return 0,
-                else => return null, // EIO: the slave side closed
+                EIO => return error.HungUp, // how Linux says it
+                else => return error.ReadFailed,
             }
         }
     }

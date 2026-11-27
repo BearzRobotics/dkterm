@@ -34,7 +34,7 @@ const Output = struct {
             if (tries == 100 or self.len == self.buf.len) break;
             var fds = [1]PollFd{.{ .fd = p.fd(), .events = 1, .revents = 0 }};
             _ = poll(&fds, 1, 50);
-            self.len += p.readSome(self.buf[self.len..]) orelse break;
+            self.len += p.readSome(self.buf[self.len..]) catch break;
         }
         if (std.mem.indexOf(u8, self.text(), needle) == null) {
             std.debug.print("expected \"{s}\" in \"{s}\"\n", .{ needle, self.text() });
@@ -311,5 +311,29 @@ test "reading into an empty buffer is not a hangup" {
     var p = try spawnSh("read line", .{});
     defer p.deinit();
     var empty: [0]u8 = .{};
-    try testing.expectEqual(@as(?usize, 0), p.readSome(&empty));
+    try testing.expectEqual(@as(usize, 0), try p.readSome(&empty));
+}
+
+test "a hangup can be undone while the child runs" {
+    var p = try spawnSh("read go; exec <&- >&- 2>&-; sleep 0.3; echo back >/dev/tty; sleep 5", .{});
+    defer p.deinit();
+    _ = try p.write("go\n");
+    var buf: [64]u8 = undefined;
+    var tries: usize = 0;
+    while (tries < 200) : (tries += 1) {
+        _ = p.readSome(&buf) catch |err| {
+            try testing.expectEqual(error.HungUp, err);
+            break;
+        };
+        _ = poll(undefined, 0, 5);
+    } else return error.NeverHungUp;
+    try testing.expectEqual(@as(?Pty.Exit, null), p.poll());
+    var out: Output = .{};
+    tries = 0;
+    while (tries < 200) : (tries += 1) {
+        _ = poll(undefined, 0, 10);
+        out.len += p.readSome(out.buf[out.len..]) catch continue;
+        if (std.mem.indexOf(u8, out.text(), "back") != null) return;
+    }
+    return error.OutputMissing;
 }
