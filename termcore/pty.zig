@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: LGPL-2.0-or-later
-//! Pseudo-terminal plumbing without GLib (SPEC.md 4.3): `openpty`, a child
+//! Pseudo-terminal plumbing without GLib (SPEC.md 4.3): a new PTY, a child
 //! started with `fork`/`execve` on the slave side, `TIOCSWINSZ` for resize.
+//! The child gets the terminal as descriptors 0-2 and nothing else that this
+//! process has open.
 //! Everything used exists in both glibc and musl.
 //!
 //! The caller owns the event loop: `fd()` is the master, already
@@ -12,7 +14,12 @@ pub const Size = struct { cols: u16, rows: u16, cell_w: u16 = 0, cell_h: u16 = 0
 
 const Winsize = extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 };
 
-extern fn openpty(amaster: *c_int, aslave: *c_int, name: ?[*]u8, termp: ?*const anyopaque, winp: ?*const Winsize) c_int;
+extern fn posix_openpt(flags: c_int) c_int;
+extern fn grantpt(fd: c_int) c_int;
+extern fn unlockpt(fd: c_int) c_int;
+extern fn ptsname_r(fd: c_int, buf: [*]u8, len: usize) c_int;
+extern fn open(path: [*:0]const u8, flags: c_int, ...) c_int;
+extern fn getdtablesize() c_int;
 extern fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
 extern fn fork() c_int;
 extern fn setsid() c_int;
@@ -38,6 +45,8 @@ const F_SETFD = 2;
 const F_DUPFD_CLOEXEC = 1030;
 const FD_CLOEXEC = 1;
 const O_NONBLOCK = 0o4000;
+const O_RDWR = 2;
+const O_NOCTTY = 0o400;
 const O_CLOEXEC = 0o2000000;
 const EAGAIN = 11;
 const EINTR = 4;
@@ -93,8 +102,8 @@ pub const Pty = struct {
 
         var master: c_int = undefined;
         var slave: c_int = undefined;
-        const ws = winsize(opts.size);
-        if (openpty(&master, &slave, null, null, &ws) != 0) return error.OpenPtyFailed;
+        if (!openPair(&master, &slave, winsize(opts.size))) return error.OpenPtyFailed;
+        const descriptor_limit = getdtablesize();
         // With a standard descriptor closed in this process, openpty hands out
         // its number, which the child is about to overwrite.
         if (!liftAboveStdio(&master) or !liftAboveStdio(&slave)) {
@@ -132,6 +141,7 @@ pub const Pty = struct {
                 childFailed(report[1], .setup);
             _ = close(slave);
             _ = close(master);
+            closeOnExecFrom3(descriptor_limit);
             if (opts.cwd) |c| if (chdir(c.ptr) != 0) childFailed(report[1], .cwd);
             _ = execve(opts.path.ptr, argv.ptr, envp.ptr);
             childFailed(report[1], .exec);
@@ -150,6 +160,45 @@ pub const Pty = struct {
             };
         }
         return .{ .master = master, .pid = pid };
+    }
+
+    /// Opens a new pseudo-terminal. Both sides are close-on-exec from the
+    /// start (openpty cannot do that), so a program another thread starts
+    /// meanwhile does not get them.
+    fn openPair(master: *c_int, slave: *c_int, ws: Winsize) bool {
+        const flags: c_int = O_RDWR | O_NOCTTY | O_CLOEXEC;
+        const m = posix_openpt(flags);
+        if (m < 0) return false;
+        var name: [64]u8 = undefined;
+        if (grantpt(m) != 0 or unlockpt(m) != 0 or ptsname_r(m, &name, name.len) != 0) {
+            _ = close(m);
+            return false;
+        }
+        const s = open(@ptrCast(&name), flags);
+        if (s < 0) {
+            _ = close(m);
+            return false;
+        }
+        if (ioctl(s, TIOCSWINSZ, &ws) != 0) {
+            _ = close(m);
+            _ = close(s);
+            return false;
+        }
+        master.* = m;
+        slave.* = s;
+        return true;
+    }
+
+    /// In the child: leaves it nothing of the parent's but the terminal. The
+    /// descriptors are marked, not closed, so the report pipe lasts until
+    /// execve. Async-signal-safe.
+    fn closeOnExecFrom3(limit: c_int) void {
+        const linux = std.os.linux;
+        const r = linux.close_range(3, std.math.maxInt(i32), .{ .UNSHARE = false, .CLOEXEC = true });
+        if (linux.errno(r) == .SUCCESS) return;
+        // Kernels before 5.11.
+        var n: c_int = 3;
+        while (n < @min(limit, 65536)) : (n += 1) _ = fcntl(n, F_SETFD, @as(c_int, FD_CLOEXEC));
     }
 
     const Failure = extern struct {

@@ -237,3 +237,13 @@ test "a program that cannot be run fails the spawn" {
         try testing.expectEqual(@backingInt(case.errno), code);
     }
 }
+
+test "the child does not inherit the parent's descriptors" {
+    // Without close-on-exec, and well away from the numbers a shell uses.
+    const file = std.os.linux.open("/dev/null", .{}, 0);
+    try testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(file));
+    defer _ = close(@intCast(file));
+    try testing.expectEqual(@as(c_int, 200), dup2(@intCast(file), 200));
+    defer _ = close(200);
+    try expectOutput("if [ -e /proc/$$/fd/200 ]; then echo le''aked; else echo cl''ean; fi", "clean");
+}
