@@ -52,6 +52,7 @@ const O_NOCTTY = 0o400;
 const O_CLOEXEC = 0o2000000;
 const EAGAIN = 11;
 const EINTR = 4;
+const ECHILD = 10;
 const WNOHANG = 1;
 const SIG_DFL = 0;
 const SIG_SETMASK = 2;
@@ -66,7 +67,10 @@ fn errno() c_int {
 
 pub const Pty = struct {
     master: c_int,
+    /// The child, or 0 once it has been reaped.
     pid: c_int,
+    /// How it ended, once it has.
+    ended: ?Exit = null,
 
     pub const SpawnOptions = struct {
         /// Absolute path of the program; there is no PATH search.
@@ -307,6 +311,9 @@ pub const Pty = struct {
         exited: u8,
         /// This signal killed it.
         signaled: u8,
+        /// It is gone and the status with it: something else reaped it, or
+        /// this process ignores SIGCHLD.
+        unknown,
 
         fn decode(status: c_int) Exit {
             const bits: u32 = @bitCast(status);
@@ -315,14 +322,29 @@ pub const Pty = struct {
         }
     };
 
-    /// How the child ended, or null while it runs. Reaps it.
+    /// How the child ended, or null while it runs. Reaps it; later calls
+    /// give the same answer.
     pub fn poll(self: *Pty) ?Exit {
-        if (self.pid <= 0) return .{ .exited = 0 };
+        if (self.pid <= 0) return self.ended orelse .unknown;
         var status: c_int = 0;
-        const r = waitpid(self.pid, &status, WNOHANG);
-        if (r == 0) return null;
+        while (true) {
+            const r = waitpid(self.pid, &status, WNOHANG);
+            if (r == 0) return null;
+            if (r > 0) break;
+            switch (errno()) {
+                EINTR => continue,
+                ECHILD => return self.reaped(.unknown),
+                // No news; the child is not forgotten on an unexplained error.
+                else => return null,
+            }
+        }
+        return self.reaped(.decode(status));
+    }
+
+    fn reaped(self: *Pty, exit: Exit) Exit {
         self.pid = 0;
-        return .decode(status);
+        self.ended = exit;
+        return exit;
     }
 
     /// How long `deinit` lets the child end on its own before killing it.

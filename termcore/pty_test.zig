@@ -111,6 +111,8 @@ test "poll tells an exit status from a signal" {
         var p = try spawnSh(case.script, .{});
         defer p.deinit();
         try testing.expectEqual(case.exit, try waitExit(&p));
+        // Asking again must not turn it into a success.
+        try testing.expectEqual(@as(?Pty.Exit, case.exit), p.poll());
     }
 }
 
@@ -293,4 +295,14 @@ test "the child does not inherit ignored or blocked signals" {
         var out: Output = .{};
         try out.until(&p, line);
     }
+}
+
+test "a child reaped by someone else has an unknown exit, not a successful one" {
+    const SIG_IGN = 1;
+    const SIGCHLD = 17;
+    const old = signal(SIGCHLD, SIG_IGN); // the kernel reaps by itself
+    defer _ = signal(SIGCHLD, old);
+    var p = try spawnSh("exit 3", .{});
+    defer p.deinit();
+    try testing.expectEqual(Pty.Exit.unknown, try waitExit(&p));
 }
