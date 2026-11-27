@@ -41,7 +41,16 @@ pub const Options = struct {
 
     /// Reads the settings from `table`.
     pub fn fromTable(table: *const toml.Table) Options {
-        var o: Options = .{};
+        return fromTableOver(table, .{});
+    }
+
+    /// Reads the settings from `table` over `base`: a key that is missing or
+    /// mistyped keeps the value it has there. For a frontend with defaults of
+    /// its own, or one that also accepts older names for some keys. A
+    /// scrollback read from `table` is limited to `max_scrollback_lines`; a
+    /// frontend with a lower limit applies it to the result.
+    pub fn fromTableOver(table: *const toml.Table, base: Options) Options {
+        var o = base;
         if (table.getString("color-scheme")) |s| o.color_scheme = s;
         if (table.getString("cursor-style")) |s| o.cursor = parseCursor(s);
         if (table.getInt("scrollback-lines")) |n| o.scrollback_lines = @intCast(std.math.clamp(n, 0, max_scrollback_lines));
@@ -149,4 +158,13 @@ test "mistyped keys keep their defaults" {
 
 test "malformed TOML is an error the caller can handle" {
     try std.testing.expectError(error.Syntax, Options.parse(std.testing.allocator, "this is = = bad", null));
+}
+
+test "a frontend's own defaults stand for what the file does not set" {
+    var doc = try toml.Document.parse(std.testing.allocator, "osc52 = true\nscrollback-lines = \"many\"\n", .{}, null);
+    defer doc.deinit();
+    const o = Options.fromTableOver(doc.root, .{ .osc52 = false, .scrollback_lines = 2000, .color_scheme = "one-half-dark" });
+    try std.testing.expect(o.osc52);
+    try std.testing.expectEqual(@as(u32, 2000), o.scrollback_lines);
+    try std.testing.expectEqualStrings("one-half-dark", o.color_scheme);
 }

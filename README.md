@@ -44,6 +44,9 @@ command = ""                 # empty: the user's login shell
 directory = ""
 ```
 
+A frontend with defaults of its own reads the same keys with `Options.fromTableOver(table, base)`.
+Text that is not valid TOML is an error, which the frontend handles.
+
 Frontend-only settings (fonts, opacity, tabs, padding) belong to the frontend.
 
 ## Stability
