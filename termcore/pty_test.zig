@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const Pty = @import("pty.zig").Pty;
+const Outbox = @import("pty.zig").Outbox;
 
 const testing = std.testing;
 
@@ -77,14 +78,14 @@ test "resize reaches the child" {
     var out: Output = .{};
     try out.until(&p, "ready");
     p.resize(.{ .cols = 100, .rows = 30 });
-    p.writeAll("\n");
+    _ = try p.write("\n");
     try out.until(&p, "30 100");
 }
 
 test "input reaches the child and its exit is seen" {
     var p = try spawnSh("read line; echo \"got:$line\"; exit 3", .{});
     defer p.deinit();
-    p.writeAll("abc\n");
+    _ = try p.write("abc\n");
     var out: Output = .{};
     try out.until(&p, "got:abc");
     var tries: usize = 0;
@@ -93,4 +94,44 @@ test "input reaches the child and its exit is seen" {
         _ = poll(undefined, 0, 10);
     } else return error.ChildDidNotExit;
     try testing.expectEqual(@as(u32, 3 << 8), status);
+}
+
+test "a large message reaches a child that starts reading late, whole" {
+    const gpa = testing.allocator;
+    var p = try spawnSh("stty raw -echo; echo ready; sleep 0.3; head -c 1048589 | wc -c", .{});
+    defer p.deinit();
+    var out: Output = .{};
+    try out.until(&p, "ready");
+
+    const body = try gpa.alloc(u8, 1024 * 1024);
+    defer gpa.free(body);
+    @memset(body, 'x');
+    var box: Outbox = .{};
+    defer box.deinit(gpa);
+    try box.queue(gpa, &.{ "\x1b[200~", body, "\x1b[201~" });
+    try box.flush(gpa, &p);
+    try testing.expect(box.pending()); // the terminal cannot take it at once
+    try box.queue(gpa, &.{"!"});
+
+    var tries: usize = 0;
+    while (box.pending()) : (tries += 1) {
+        if (tries == 100_000) return error.NotFlushed;
+        var fds = [1]PollFd{.{ .fd = p.fd(), .events = 4, .revents = 0 }};
+        _ = poll(&fds, 1, 100);
+        try box.flush(gpa, &p);
+    }
+    try out.until(&p, "1048589");
+}
+
+test "a full outbox refuses the whole message" {
+    const gpa = testing.allocator;
+    var box: Outbox = .{ .limit = 8 };
+    defer box.deinit(gpa);
+    try box.queue(gpa, &.{"abcd"});
+    try testing.expectError(error.OutboxFull, box.queue(gpa, &.{ "ef", "ghi" }));
+    try testing.expectEqualStrings("abcd", box.bytes.items);
+    try box.queue(gpa, &.{ "ef", "gh" });
+    try testing.expectEqualStrings("abcdefgh", box.bytes.items);
+    box.clear(gpa);
+    try testing.expect(!box.pending());
 }

@@ -20,7 +20,7 @@ extern fn dup2(old: c_int, new: c_int) c_int;
 extern fn close(fd: c_int) c_int;
 extern fn fcntl(fd: c_int, cmd: c_int, ...) c_int;
 extern fn read(fd: c_int, buf: [*]u8, count: usize) isize;
-extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
+const sys_write = @extern(*const fn (fd: c_int, buf: [*]const u8, count: usize) callconv(.c) isize, .{ .name = "write" });
 extern fn execve(path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8) c_int;
 extern fn _exit(status: c_int) noreturn;
 extern fn waitpid(pid: c_int, status: ?*c_int, options: c_int) c_int;
@@ -127,28 +127,27 @@ pub const Pty = struct {
         }
     }
 
-    /// Write all of `data`, waiting for a slow child if it must. Input is a
-    /// few bytes at a time, so this does not stall the console in practice.
-    pub fn writeAll(self: *const Pty, data: []const u8) void {
-        var rest = data;
-        var spins: u32 = 0;
-        while (rest.len > 0) {
-            const n = write(self.master, rest.ptr, rest.len);
+    pub const WriteError = error{WriteFailed};
+
+    /// Writes as much of `data` as the terminal takes without waiting, and
+    /// returns how much that was: 0 when the child is not reading. A paste or
+    /// anything else that must arrive whole belongs in an `Outbox`.
+    pub fn write(self: *const Pty, data: []const u8) WriteError!usize {
+        var done: usize = 0;
+        while (done < data.len) {
+            const n = sys_write(self.master, data[done..].ptr, data.len - done);
             if (n > 0) {
-                rest = rest[@intCast(n)..];
-                spins = 0;
+                done += @intCast(n);
                 continue;
             }
+            if (n == 0) break;
             switch (errno()) {
                 EINTR => continue,
-                EAGAIN => {
-                    spins += 1;
-                    if (spins > 1000) return; // child is not reading; drop the input
-                    std.Thread.yield() catch {};
-                },
-                else => return,
+                EAGAIN => break,
+                else => return error.WriteFailed,
             }
         }
+        return done;
     }
 
     /// The exit status if the child has ended, else null. Reaps it.
@@ -173,5 +172,81 @@ pub const Pty = struct {
         if (self.pid > 0) _ = waitpid(self.pid, null, 0);
         _ = close(self.master);
         self.* = .{ .master = -1, .pid = 0 };
+    }
+};
+
+/// Input waiting for a child that is not reading yet. Nothing queued is
+/// dropped: `queue` takes all of a message or refuses all of it.
+///
+/// Call `queue`, then `flush`. While `pending`, ask `poll` for POLLOUT on
+/// `Pty.fd` and call `flush` again when it is ready. Keep reading the child's
+/// output meanwhile; a child blocked on output reads no input.
+pub const Outbox = struct {
+    bytes: std.ArrayList(u8) = .empty,
+    /// How much of `bytes` has been written already.
+    sent: usize = 0,
+    /// The most that may wait at once.
+    limit: usize = default_limit,
+
+    pub const default_limit = 8 * 1024 * 1024;
+    /// Storage larger than this is given back once the queue is empty.
+    const keep_capacity = 64 * 1024;
+
+    pub const QueueError = error{ OutboxFull, OutOfMemory };
+
+    pub fn deinit(self: *Outbox, gpa: std.mem.Allocator) void {
+        self.wipe();
+        self.bytes.deinit(gpa);
+        self.* = undefined;
+    }
+
+    pub fn pending(self: *const Outbox) bool {
+        return self.sent < self.bytes.items.len;
+    }
+
+    /// Appends `parts`, in order, as one message.
+    pub fn queue(self: *Outbox, gpa: std.mem.Allocator, parts: []const []const u8) QueueError!void {
+        var total: usize = 0;
+        for (parts) |part| total = std.math.add(usize, total, part.len) catch return error.OutboxFull;
+        const waiting = self.bytes.items.len - self.sent;
+        if (total > self.limit -| waiting) return error.OutboxFull;
+        if (self.sent > 0) {
+            std.mem.copyForwards(u8, self.bytes.items[0..waiting], self.bytes.items[self.sent..]);
+            std.crypto.secureZero(u8, self.bytes.items[waiting..]);
+            self.bytes.items.len = waiting;
+            self.sent = 0;
+        }
+        // Grow by hand, so that no unwiped copy of typed input is left behind.
+        const needed = waiting + total;
+        if (needed > self.bytes.capacity) {
+            var larger: std.ArrayList(u8) = .empty;
+            try larger.ensureTotalCapacity(gpa, @max(needed, self.bytes.capacity * 2));
+            larger.appendSliceAssumeCapacity(self.bytes.items);
+            std.crypto.secureZero(u8, self.bytes.items);
+            self.bytes.deinit(gpa);
+            self.bytes = larger;
+        }
+        for (parts) |part| self.bytes.appendSliceAssumeCapacity(part);
+    }
+
+    /// Writes what the terminal will take now. On an error the queue is left
+    /// as it was; use `clear` when the session is over.
+    pub fn flush(self: *Outbox, gpa: std.mem.Allocator, pty: *const Pty) Pty.WriteError!void {
+        self.sent += try pty.write(self.bytes.items[self.sent..]);
+        if (!self.pending()) self.clear(gpa);
+    }
+
+    /// Discards what is waiting. Input can hold passwords, so it is wiped.
+    pub fn clear(self: *Outbox, gpa: std.mem.Allocator) void {
+        self.wipe();
+        if (self.bytes.capacity > keep_capacity)
+            self.bytes.clearAndFree(gpa)
+        else
+            self.bytes.clearRetainingCapacity();
+        self.sent = 0;
+    }
+
+    fn wipe(self: *Outbox) void {
+        std.crypto.secureZero(u8, self.bytes.items);
     }
 };

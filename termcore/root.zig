@@ -12,7 +12,7 @@ pub const options = @import("options.zig");
 test {
     // Zig only type-checks what something references. Name every public
     // declaration, so that none can stop compiling unnoticed.
-    inline for (.{ pty, pty.Pty, schemes, keymap, glue, options, options.Options, options.Parsed }) |namespace| {
+    inline for (.{ pty, pty.Pty, pty.Outbox, schemes, keymap, glue, options, options.Options, options.Parsed }) |namespace| {
         std.testing.refAllDecls(namespace);
     }
     // Test files that nothing else imports.
