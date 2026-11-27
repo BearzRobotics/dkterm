@@ -10,9 +10,11 @@ pub const glue = @import("glue.zig");
 pub const options = @import("options.zig");
 
 test {
-    _ = pty;
-    _ = schemes;
-    _ = keymap;
-    _ = glue;
-    _ = options;
+    // Zig only type-checks what something references. Name every public
+    // declaration, so that none can stop compiling unnoticed.
+    inline for (.{ pty, pty.Pty, schemes, keymap, glue, options, options.Options, options.Parsed }) |namespace| {
+        std.testing.refAllDecls(namespace);
+    }
 }
+
+const std = @import("std");
