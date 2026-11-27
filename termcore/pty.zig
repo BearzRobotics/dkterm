@@ -175,27 +175,3 @@ pub const Pty = struct {
         self.* = .{ .master = -1, .pid = 0 };
     }
 };
-
-const PollFd = extern struct { fd: c_int, events: c_short, revents: c_short };
-extern fn poll(fds: [*]PollFd, n: c_ulong, timeout: c_int) c_int;
-
-test "a child's output arrives on the master" {
-    const a = std.testing.allocator;
-    var p = try Pty.spawn(a, .{
-        .path = "/bin/echo",
-        .argv = &.{ "echo", "hello" },
-        .env = &.{"TERM=linux"},
-        .size = .{ .cols = 80, .rows = 24 },
-    });
-    defer p.deinit();
-    var buf: [64]u8 = undefined;
-    var got: usize = 0;
-    var tries: usize = 0;
-    while (tries < 100) : (tries += 1) {
-        var pfd = [1]PollFd{.{ .fd = p.fd(), .events = 1, .revents = 0 }};
-        _ = poll(&pfd, 1, 50);
-        const n = p.readSome(buf[got..]) orelse break;
-        got += n;
-    }
-    try std.testing.expect(std.mem.indexOf(u8, buf[0..got], "hello") != null);
-}

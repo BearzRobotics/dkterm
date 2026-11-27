@@ -15,6 +15,8 @@ test {
     inline for (.{ pty, pty.Pty, schemes, keymap, glue, options, options.Options, options.Parsed }) |namespace| {
         std.testing.refAllDecls(namespace);
     }
+    // Test files that nothing else imports.
+    _ = @import("pty_test.zig");
 }
 
 const std = @import("std");
